@@ -1,0 +1,340 @@
+---
+title: "Draft Analyses"
+subtitle: "\\Large Steffny Meegoda"
+author: "https://github.com/Steffny2004/gov51-proj"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(
+	echo = TRUE,
+	eval = TRUE,
+	message = FALSE,
+	warning = FALSE, 
+	library(tidyverse), 
+	library(ggplot2), 
+	library(haven), 
+	library(readxl), 
+	library(kableExtra))
+```
+
+# Load Data
+```{r}
+# Load Opportunity Atlas data
+tract_outcomes <- read_dta("../data/raw/tract_outcomes.dta")
+```
+
+# Filter Atlas Dataset
+```{r}
+# Multi-City Dataset
+city_tracts <- tract_outcomes %>%
+  
+  # Filter to NYC, LA, Chicago, Houston, Atlanta, and Boston
+  mutate(city = case_when(
+    state == 36 & county %in% c(5, 47, 61, 81, 85) ~ "New York City",
+    state == 6  & county == 37 ~ "Los Angeles",
+    state == 17 & county == 31 ~ "Chicago",
+    state == 48 & county == 201 ~ "Houston",
+    state == 13 & county %in% c(89, 121, 135) ~ "Atlanta",
+    state == 25 & county == 25 ~ "Boston",
+    TRUE ~ NA_character_)) %>%
+  filter(!is.na(city)) %>%
+  
+  # Select vars
+  select(
+    city, state, county, tract,
+    
+    # Pooled mobility at p25 parental income (main outcome)
+    kfr_pooled_pooled_p25, 
+
+    # By race at p25
+    kfr_white_pooled_p25,
+    kfr_black_pooled_p25,
+    kfr_hisp_pooled_p25,
+    kfr_asian_pooled_p25,
+    
+    # Unconditional means by race
+    kfr_pooled_pooled_mean,
+    kfr_white_pooled_mean,
+    kfr_black_pooled_mean,
+    kfr_hisp_pooled_mean,
+    kfr_asian_pooled_mean,
+
+    # Secondary outcomes
+    kfr_pooled_pooled_p1,
+    kfr_top20_pooled_pooled_p25,
+    jail_pooled_pooled_p25,
+    teenbrth_pooled_female_p25,
+    two_par_pooled_pooled_p25,
+    lpov_nbh_pooled_pooled_p25) %>%
+  
+  # Create outcome gap vars (compare to white)
+  mutate(
+    gap_black = kfr_white_pooled_p25 - kfr_black_pooled_p25,
+    gap_hispanic = kfr_white_pooled_p25 - kfr_hisp_pooled_p25,
+    gap_asian = kfr_white_pooled_p25 - kfr_asian_pooled_p25) %>%
+  
+  # Add borough label from county code
+  mutate(borough = case_when(
+    county == 5  ~ "Bronx",
+    county == 47 ~ "Brooklyn",
+    county == 61 ~ "Manhattan",
+    county == 81 ~ "Queens",
+    county == 85 ~ "Staten Island"))
+
+# NYC-Only Dataset
+nyc_tracts <- city_tracts %>%
+  filter(city == "New York City")
+```
+
+\newpage
+
+# Cross-City Summary
+```{r}
+# Summary statistics table by city
+city_summary <- city_tracts %>%
+  group_by(city) %>%
+  summarise(
+    mean_mobility = mean(kfr_pooled_pooled_p25, na.rm = TRUE),
+    median_mobility = median(kfr_pooled_pooled_p25, na.rm = TRUE),
+    sd_mobility = sd(kfr_pooled_pooled_p25, na.rm = TRUE),
+    mean_top20  = mean(kfr_top20_pooled_pooled_p25, na.rm = TRUE),
+    mean_mob_white = mean(kfr_white_pooled_p25, na.rm = TRUE),
+    mean_mob_black = mean(kfr_black_pooled_p25, na.rm = TRUE),
+    mean_mob_hispanic = mean(kfr_hisp_pooled_p25, na.rm = TRUE),
+    mean_mob_asian = mean(kfr_asian_pooled_p25, na.rm = TRUE),
+    mean_gap_black = mean(gap_black, na.rm = TRUE),
+    mean_gap_hispanic = mean(gap_hispanic, na.rm = TRUE),
+    mean_gap_asian = mean(gap_asian, na.rm = TRUE),
+    n_tracts = n(),
+    .groups = "drop") %>%
+  arrange(desc(mean_mobility))
+
+# Render summary statistics table by city
+city_summary_table <- city_summary %>%
+  arrange(desc(mean_mobility)) %>%
+  select(city, n_tracts, mean_mobility, sd_mobility,
+         mean_mob_white, mean_mob_black, mean_mob_hispanic, mean_mob_asian,
+         mean_gap_black, mean_gap_hispanic, mean_gap_asian) %>%
+  mutate(across(where(is.numeric), ~round(., 3))) %>%
+  kable(
+    col.names = c("City", "# Tracts", "Mean", "SD",
+                  "White", "Black", "Hispanic", "Asian",
+                  "Black", "Hispanic", "Asian"),
+    caption = "Intergenerational Mobility by City (Low-Income Childr Born 1978–1983)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  add_header_above(c(" " = 4,
+                     "Mobility by Race" = 4,
+                     "Gap Relative to White" = 3))
+city_summary_table
+
+# Figure 1: Mean mobility by city
+city_mean_mobility_barplot <- ggplot(city_summary, aes(x = reorder(city, mean_mobility), y = mean_mobility)) +
+  geom_bar(stat = "identity", fill = "lightblue", color = "skyblue") +
+  geom_errorbar(aes(
+    ymin = mean_mobility - sd_mobility,
+    ymax = mean_mobility + sd_mobility),
+    width = 0.3, color = "grey40") +
+  coord_flip() +
+  labs(
+    title = "Mean Intergenerational Mobility by City",
+    subtitle = "Low-Income Children Born 1978-1983",
+    x = NULL,
+    y = "Mean Income Rank",
+    caption  = "Error bars = ±1 SD across tracts. Source: Opportunity Atlas") +
+  theme_minimal()
+ggsave("../output/city_mean_mobility_barplot.png", plot = city_mean_mobility_barplot)
+city_mean_mobility_barplot
+
+# Figure 2: Distribution of tract-level mobility by city
+city_mobility_dist <- ggplot(city_tracts, aes(x = kfr_pooled_pooled_p25, fill = city)) +
+  geom_density(alpha = 0.3) +
+  labs(
+    title = "Distribution of Tract-Level Mobility Across Cities",
+    subtitle = "Low-Income Children Born 1978-1983",
+    x = "Mean Income Rank",
+    y = "Density",
+    fill = "City",
+    caption = "Source: Opportunity Atlas") +
+  theme_minimal()
+ggsave("../output/city_mobility_dist.png", plot = city_mobility_dist)
+city_mobility_dist
+```
+
+\newpage
+
+# Within NYC Borough Variation
+```{r}
+# Borough summary statistics
+borough_summary <- nyc_tracts %>%
+  group_by(borough) %>%
+  summarise(
+    mean_mobility = mean(kfr_pooled_pooled_p25, na.rm = TRUE),
+    median_mobility = median(kfr_pooled_pooled_p25, na.rm = TRUE),
+    sd_mobility = sd(kfr_pooled_pooled_p25, na.rm = TRUE),
+    mean_top20 = mean(kfr_top20_pooled_pooled_p25, na.rm = TRUE),
+    mean_jail = mean(jail_pooled_pooled_p25, na.rm = TRUE),
+    mean_teen_birth = mean(teenbrth_pooled_female_p25, na.rm = TRUE),
+    mean_two_parent = mean(two_par_pooled_pooled_p25,  na.rm = TRUE),
+    n_tracts = n(),
+    .groups = "drop") %>%
+  arrange(desc(mean_mobility))
+
+# Render borough summary statistics
+borough_summary %>%
+  arrange(desc(mean_mobility)) %>%
+  mutate(across(where(is.numeric), ~round(., 3))) %>%
+  kable(
+    col.names = c("Borough", "Mean", "Median", "SD",
+                  "Prob. Top 20%", "Incarceration", "Teen Birth", "Two-Parent", "# Tracts"),
+    caption = "Intergenerational Mobility by NYC Borough (Low-Income Children Born 1978–1983)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  add_header_above(c(" " = 1,
+                     "Mobility" = 3,
+                     "Secondary Outcomes" = 4,
+                     " " = 1))
+borough_summary
+
+# Figure 3: Distribution of mobility across tracts by borough
+nyc_mobility_dist_density <- ggplot(nyc_tracts, aes(x = kfr_pooled_pooled_p25, fill = borough)) +
+  geom_density(alpha = 0.4) +
+  labs(
+    title = "Distribution of Intergenerational Mobility Across NYC Tracts by Borough",
+    subtitle = "Low-Income Children Born 1978-1983",
+    x = "Mean Income Rank",
+    y = "Density",
+    fill = "Borough",
+    caption = "Source: Opportunity Atlas") +
+  theme_minimal()
+ggsave("../output/nyc_mobility_dist_density.png", plot = nyc_mobility_dist_density)
+nyc_mobility_dist_density
+
+# Figure 4: Violin Plot of tract-level mobility by borough
+nyc_mobility_dist_violin <- ggplot(nyc_tracts, aes(x = reorder(borough, kfr_pooled_pooled_p25, FUN = median, na.rm = TRUE),
+                       y = kfr_pooled_pooled_p25,
+                       fill = borough)) +
+  geom_violin(alpha = 0.6, trim = FALSE) +
+  geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) +
+  coord_flip() +
+  labs(
+    title = "Tract-Level Mobility Distribution by NYC Borough",
+    subtitle = "Low-Income Children Born 1978-1983",
+    x = NULL,
+    y = "Mean Income Rank",
+    caption = "Source: Opportunity Atlas") +
+  theme_minimal() +
+  theme(legend.position = "none")
+ggsave("../output/nyc_mobility_dist_violin.png", plot = nyc_mobility_dist_violin)
+nyc_mobility_dist_violin
+```
+
+\newpage
+
+# Racial Mobility Gaps
+```{r}
+# Borough-level racial gap summary
+gap_summary <- nyc_tracts %>%
+  group_by(borough) %>%
+  summarise(
+    mean_mob_white = mean(kfr_white_pooled_p25, na.rm = TRUE),
+    mean_mob_black = mean(kfr_black_pooled_p25, na.rm = TRUE),
+    mean_mob_hispanic = mean(kfr_hisp_pooled_p25,  na.rm = TRUE),
+    mean_mob_asian = mean(kfr_asian_pooled_p25, na.rm = TRUE),
+    mean_gap_black = mean(gap_black, na.rm = TRUE),
+    mean_gap_hispanic = mean(gap_hispanic, na.rm = TRUE),
+    mean_gap_asian = mean(gap_asian, na.rm = TRUE),
+    .groups = "drop")
+
+# Render borough-level racial gap summary table
+gap_summary_table <-  gap_summary %>%
+  arrange(desc(mean_gap_black)) %>%
+  mutate(across(where(is.numeric), ~round(., 3))) %>%
+  kable(
+    col.names = c("Borough",
+                  "White", "Black", "Hispanic", "Asian",
+                  "Black", "Hispanic", "Asian"),
+    caption = "Racial Mobility Gaps by NYC Borough (Gap = White Minus Other Group)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  add_header_above(c(" " = 1,
+                     "Mean Mobility by Race" = 4,
+                     "Gap Relative to White" = 3))
+gap_summary_table
+
+# Figure 5: Racial mobility by borough
+mobility_long <- nyc_tracts %>%
+  group_by(borough) %>%
+  summarise(
+    White = mean(kfr_white_pooled_p25, na.rm = TRUE),
+    Black = mean(kfr_black_pooled_p25, na.rm = TRUE),
+    Hispanic = mean(kfr_hisp_pooled_p25,na.rm = TRUE),
+    Asian = mean(kfr_asian_pooled_p25, na.rm = TRUE),
+    .groups = "drop") %>%
+  pivot_longer(cols = c(White, Black, Hispanic, Asian),
+               names_to = "race", values_to = "mobility")
+
+nyc_mobility_by_race <- ggplot(mobility_long, aes(x = borough, y = mobility, fill = race)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Intergenerational Mobility by Race and Borough",
+    subtitle = "Low-Income Children Born 1978-1983",
+    x = "Borough",
+    y = "Mean Income Rank",
+    fill = "Race",
+    caption = "Source: Opportunity Atlas") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1))
+ggsave("../output/nyc_mobility_by_race.png", plot = nyc_mobility_by_race)
+nyc_mobility_by_race
+
+# Figure 6: Racial gap relative to white by borough
+gap_long <- nyc_tracts %>%
+  group_by(borough) %>%
+  summarise(
+    Black = mean(gap_black, na.rm = TRUE),
+    Hispanic = mean(gap_hispanic, na.rm = TRUE),
+    Asian = mean(gap_asian, na.rm = TRUE),
+    .groups = "drop") %>%
+  pivot_longer(cols = c(Black, Hispanic, Asian),
+               names_to = "race", values_to = "gap")
+
+nyc_gap_barplot <- ggplot(gap_long, aes(x = borough, y = gap, fill = race)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  labs(
+    title = "Racial Mobility Gap Relative to White Children, by Borough",
+    x = "Borough",
+    y = "Mobility Gap",
+    fill = "Race",
+    caption  = "Source: Opportunity Atlas") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1))
+nyc_gap_barplot
+ggsave("../output/nyc_gap_barplot.png", plot = nyc_gap_barplot)
+
+# Figure 7: Tract-level gap distributions by borough
+nyc_gap_dist <- nyc_tracts %>%
+  select(borough, gap_black, gap_hispanic, gap_asian) %>%
+  pivot_longer(cols = starts_with("gap_"),
+               names_to = "race", values_to = "gap") %>%
+  mutate(race = recode(race,
+    "gap_black" = "Black",
+    "gap_hispanic" = "Hispanic",
+    "gap_asian" = "Asian")) %>%
+  ggplot(aes(x = gap, fill = race)) +
+  geom_density(alpha = 0.4) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray40") +
+  facet_wrap(~borough) +
+  labs(
+    title = "Distribution of Racial Mobility Gaps Across NYC Tracts",
+    x = "Mobility Gap",
+    y = "Density",
+    fill = "Race",
+    caption  = "Source: Opportunity Atlas") +
+  theme_minimal()
+ggsave("../output/nyc_gap_dist.png", plot = nyc_gap_dist)
+nyc_gap_dist
+```
