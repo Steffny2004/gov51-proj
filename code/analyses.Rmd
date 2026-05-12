@@ -89,6 +89,7 @@ city_tracts <- tract_outcomes %>%
 # NYC-Only Dataset
 nyc_tracts <- city_tracts %>%
   filter(city == "New York City")
+saveRDS(nyc_tracts, "../output/nyc_tracts.rds")
 ```
 
 \newpage
