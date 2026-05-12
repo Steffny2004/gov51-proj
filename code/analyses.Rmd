@@ -11,23 +11,24 @@ knitr::opts_chunk$set(
 	echo = TRUE,
 	eval = TRUE,
 	message = FALSE,
-	warning = FALSE, 
-	library(tidyverse), 
-	library(ggplot2), 
-	library(haven), 
-	library(readxl), 
-	library(kableExtra))
+	warning = FALSE)
+
+library(tidyverse)
+library(tidycensus)
+library(ggplot2)
+library(haven)
+library(readxl)
+library(kableExtra)
+library(modelsummary)
 ```
 
 # Load Data
-
-```{r, cache=TRUE}
+```{r}
 # Load Opportunity Atlas data
 tract_outcomes <- read_dta("../data/raw/tract_outcomes.dta")
 ```
 
 # Filter Atlas Dataset
-
 ```{r}
 # Multi-City Dataset
 city_tracts <- tract_outcomes %>%
@@ -93,7 +94,6 @@ nyc_tracts <- city_tracts %>%
 \newpage
 
 # Cross-City Summary
-
 ```{r}
 # Summary statistics table by city
 city_summary <- city_tracts %>%
@@ -113,6 +113,7 @@ city_summary <- city_tracts %>%
     n_tracts = n(),
     .groups = "drop") %>%
   arrange(desc(mean_mobility))
+saveRDS(city_summary, "../output/city_summary.rds")
 
 # Render summary statistics table by city
 city_summary_table <- city_summary %>%
@@ -132,6 +133,7 @@ city_summary_table <- city_summary %>%
                      "Mobility by Race" = 4,
                      "Gap Relative to White" = 3))
 city_summary_table
+
 
 # Figure 1: Mean mobility by city
 city_mean_mobility_barplot <- ggplot(city_summary, aes(x = reorder(city, mean_mobility), y = mean_mobility)) +
@@ -169,7 +171,6 @@ city_mobility_dist
 \newpage
 
 # Within NYC Borough Variation
-
 ```{r}
 # Borough summary statistics
 borough_summary <- nyc_tracts %>%
@@ -201,6 +202,7 @@ borough_summary %>%
                      "Secondary Outcomes" = 4,
                      " " = 1))
 borough_summary
+saveRDS(borough_summary, "../output/borough_summary.rds")
 
 # Figure 3: Distribution of mobility across tracts by borough
 nyc_mobility_dist_density <- ggplot(nyc_tracts, aes(x = kfr_pooled_pooled_p25, fill = borough)) +
@@ -238,7 +240,6 @@ nyc_mobility_dist_violin
 \newpage
 
 # Racial Mobility Gaps
-
 ```{r}
 # Borough-level racial gap summary
 gap_summary <- nyc_tracts %>%
@@ -252,9 +253,10 @@ gap_summary <- nyc_tracts %>%
     mean_gap_hispanic = mean(gap_hispanic, na.rm = TRUE),
     mean_gap_asian = mean(gap_asian, na.rm = TRUE),
     .groups = "drop")
+saveRDS(gap_summary, "../output/gap_summary.rds")
 
 # Render borough-level racial gap summary table
-gap_summary_table <-  gap_summary %>%
+gap_summary_table <- gap_summary %>%
   arrange(desc(mean_gap_black)) %>%
   mutate(across(where(is.numeric), ~round(., 3))) %>%
   kable(
@@ -342,4 +344,39 @@ nyc_gap_dist <- nyc_tracts %>%
   theme_minimal()
 ggsave("../output/nyc_gap_dist.png", plot = nyc_gap_dist)
 nyc_gap_dist
+
+
 ```
+
+# Regression 
+
+```{r}
+# Does borough predict pooled mobility?
+model1 <- lm(kfr_pooled_pooled_p25 ~ borough, data = nyc_tracts)
+saveRDS(model1, "../output/model1.rds")
+
+# Does borough predict Black-white gap?
+model2 <- lm(gap_black ~ borough, data = nyc_tracts)
+saveRDS(model2, "../output/model2.rds")
+
+# Does borough predict Hispanic-white gap?
+model3 <- lm(gap_hispanic ~ borough, data = nyc_tracts)
+saveRDS(model3, "../output/model3.rds")
+
+# Display regression table
+modelsummary(
+  list("Pooled Mobility" = model1,
+       "Black-White Gap" = model2,
+       "Hispanic-White Gap" = model3),
+  stars = TRUE,
+  coef_rename = c(
+    "boroughBrooklyn" = "Brooklyn",
+    "boroughManhattan" = "Manhattan",
+    "boroughQueens"  = "Queens",
+    "boroughStaten Island" = "Staten Island"),
+  gof_map = c("nobs", "r.squared"),
+  title = "OLS Regressions: Borough Predictors of Mobility and Racial Gaps",
+  notes = "Reference category: Bronx. Standard errors in parentheses.")
+
+```
+
